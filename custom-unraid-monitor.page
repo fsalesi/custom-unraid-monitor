@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<Plugin>
+    <Title>Frank’s Monitor</Title>
+    <Type>dashboard</Type>
+</Plugin>
+
+<div style='padding:20px; text-align:center; font-size:18px;'>
+    <strong>Frank's Monitor</strong><br>
+    <span id='frankstatus'>Loading…</span>
+</div>
+
+<script>
+fetch("/plugins/custom-unraid-monitor/api.php?action=status")
+  .then(r => r.text())
+  .then(t => document.getElementById("frankstatus").innerHTML = t)
+  .catch(_ => document.getElementById("frankstatus").innerHTML = "ERROR");
+</script>

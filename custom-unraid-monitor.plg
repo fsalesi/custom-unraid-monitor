@@ -1,304 +1,324 @@
 <?xml version="1.0"?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "custom-unraid-monitor">
+  <!ENTITY author    "Frank Salesi">
+  <!ENTITY version   "2025.11.21.001">
+  <!ENTITY pluginURL "https://raw.githubusercontent.com/fsalesi/custom-unraid-monitor/master/custom-unraid-monitor.plg">
+  <!ENTITY support   "https://forums.unraid.net">
+  <!ENTITY min       "7.0.0">
+  <!ENTITY max       "7.99.99">
+]>
+
 <PLUGIN
-    name="custom-unraid-monitor"
-    author="Frank Salesi"
-    version="2025.11.21"
-    pluginURL="https://raw.githubusercontent.com/fsalesi/custom-unraid-monitor/master/custom-unraid-monitor.plg"
-    support="https://forums.unraid.net"
-    min="7.0.0"
-    max="7.99.99">
+    name="&name;"
+    author="&author;"
+    version="&version;"
+    pluginURL="&pluginURL;"
+    support="&support;"
+    min="&min;"
+    max="&max;"
+>
 
   <CHANGES>
-    Initial version of Custom Unraid Monitor plugin UI.
+    2025.11.21.001 - Initial version of Frank's custom monitor UI.
   </CHANGES>
 
   <!--
-    Main UI page (.page) – appears under Settings -> User Utilities and can be
-    opened directly from the Plugins page as well.
+    MAIN PAGE (Settings -> User Utilities -> Frank's Monitor)
+    This will live at:
+      /usr/local/emhttp/plugins/custom-unraid-monitor/custom-unraid-monitor.page
   -->
   <FILE Name="/usr/local/emhttp/plugins/custom-unraid-monitor/custom-unraid-monitor.page">
     <![CDATA[
+Menu="Settings:User Utilities"
+Title="Frank's Monitor"
+Tag="franksmonitor"
+Icon="fa-heartbeat"
+
 <?php
-// /usr/local/emhttp/plugins/custom-unraid-monitor/custom-unraid-monitor.page
-
-$CONFIG_DIR = "/boot/config/plugins/custom-unraid-monitor";
-$STATE_FILE = "$CONFIG_DIR/state.json";
-
-if (!is_dir($CONFIG_DIR)) {
-    @mkdir($CONFIG_DIR, 0777, true);
-}
-
-function cum_load_state($state_file) {
-    if (!file_exists($state_file)) return [];
-    $json = file_get_contents($state_file);
-    if (!$json) return [];
-    $data = json_decode($json, true);
-    return is_array($data) ? $data : [];
-}
-
-$state = cum_load_state($STATE_FILE);
-$now   = time();
-
-// thresholds (seconds)
-$max_green  = 30 * 60;          // 30 minutes
-$max_yellow = 60 * 60;          // 60 minutes
-$max_red    = 7 * 24 * 60 * 60; // 7 days
-
-function cum_classify_status($age) {
-    global $max_green, $max_yellow, $max_red;
-    if ($age === null || $age > $max_red) return 'GRAY';
-    if ($age <= $max_green)  return 'GREEN';
-    if ($age <= $max_yellow) return 'YELLOW';
-    return 'RED';
-}
-
-$overall = 'GRAY';
-$worst_rank = 0; // GREEN=1, YELLOW=2, RED=3, GRAY=0
-
-foreach ($state as $id => $row) {
-    $age = isset($row['last_seen']) ? ($now - (int)$row['last_seen']) : null;
-    $c = cum_classify_status($age);
-
-    $rank = 0;
-    if ($c === 'GREEN')  $rank = 1;
-    if ($c === 'YELLOW') $rank = 2;
-    if ($c === 'RED')    $rank = 3;
-
-    if ($rank > $worst_rank) {
-        $worst_rank = $rank;
-        $overall = $c;
-    }
-}
-
-function cum_color_style($c) {
-    switch ($c) {
-        case 'GREEN':  return 'background-color:#2ecc71;color:#fff;';
-        case 'YELLOW': return 'background-color:#f1c40f;color:#000;';
-        case 'RED':    return 'background-color:#e74c3c;color:#fff;';
-        case 'GRAY':
-        default:       return 'background-color:#7f8c8d;color:#fff;';
-    }
-}
-
-$overall_style = cum_color_style($overall);
+$docroot = $docroot ?? $_SERVER['DOCUMENT_ROOT'] ?: '/usr/local/emhttp';
+require_once "$docroot/webGui/include/Helpers.php";
 ?>
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Custom Unraid Monitor</title>
-    <style>
-        .cum-summary-box {
-            padding: 10px;
-            border-radius: 5px;
-            display: inline-block;
-            margin-bottom: 15px;
-            font-weight: bold;
-        }
-        table.cum-table {
-            border-collapse: collapse;
-            width: 100%;
-        }
-        table.cum-table th,
-        table.cum-table td {
-            border: 1px solid #ccc;
-            padding: 6px 8px;
-            text-align: left;
-        }
-        table.cum-table th {
-            background-color: #f0f0f0;
-        }
-        .cum-status-pill {
-            padding: 3px 8px;
-            border-radius: 10px;
-            font-size: 0.9em;
-            font-weight: bold;
-            display: inline-block;
-        }
-        .cum-small-text {
-            font-size: 0.85em;
-            color: #666;
-        }
-    </style>
-</head>
-<body>
 
-<h2>Custom Unraid Monitor</h2>
+<style>
+  .fm-container {
+    padding: 10px;
+  }
+  .fm-summary {
+    margin-bottom: 10px;
+    font-weight: bold;
+  }
+  .fm-summary span.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    color: #fff;
+    margin-left: 6px;
+  }
+  .fm-badge-green { background-color: #4caf50; }
+  .fm-badge-yellow { background-color: #ffc107; color: #000; }
+  .fm-badge-red { background-color: #f44336; }
+  .fm-badge-gray { background-color: #9e9e9e; }
 
-<div class="cum-summary-box" style="<?php echo $overall_style; ?>">
-    Overall Status: <?php echo htmlspecialchars($overall); ?>
+  .fm-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .fm-table th, .fm-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #ddd;
+    font-size: 0.9rem;
+  }
+  .fm-table th {
+    text-align: left;
+    background: #f5f5f5;
+  }
+  .fm-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .fm-dot-green  { background-color: #4caf50; }
+  .fm-dot-yellow { background-color: #ffc107; }
+  .fm-dot-red    { background-color: #f44336; }
+  .fm-dot-gray   { background-color: #9e9e9e; }
+
+  .fm-toggle {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #2196f3;
+    margin-left: 10px;
+  }
+</style>
+
+<div class="fm-container">
+  <div class="fm-summary">
+    Frank's Monitor:
+    <span id="fm-overall-badge" class="badge fm-badge-gray">Loading...</span>
+    <span id="fm-toggle-details" class="fm-toggle" onclick="fmToggleDetails()">show details ▾</span>
+  </div>
+
+  <div id="fm-details" style="display:none;">
+    <table class="fm-table" id="fm-table">
+      <thead>
+        <tr>
+          <th>Server</th>
+          <th>Script</th>
+          <th>Status</th>
+          <th>Last Seen</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="5">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
-<p class="cum-small-text">
-    GREEN ≤ 30 minutes, YELLOW ≤ 60 minutes, RED ≤ 7 days, GRAY &gt; 7 days or never seen.<br>
-    Entries can be removed manually (Clear) or will age to GRAY if inactive.
-</p>
+<script>
+function fmStatusOrder(color) {
+  // green < yellow < gray < red in "badness"
+  if (color === "green") return 1;
+  if (color === "yellow") return 2;
+  if (color === "gray") return 3;
+  if (color === "red") return 4;
+  return 5;
+}
 
-<table class="cum-table">
-    <thead>
-        <tr>
-            <th>Hostname</th>
-            <th>Script</th>
-            <th>Reported Status</th>
-            <th>Last Seen</th>
-            <th>Age</th>
-            <th>Health</th>
-            <th>Action</th>
-        </tr>
-    </thead>
-    <tbody>
-<?php if (empty($state)): ?>
-        <tr><td colspan="7">No scripts have reported in yet.</td></tr>
-<?php else: ?>
-<?php foreach ($state as $id => $row):
-    $host   = isset($row['hostname'])  ? $row['hostname']  : 'unknown';
-    $script = isset($row['script'])    ? $row['script']    : 'unknown';
-    $st     = isset($row['status'])    ? $row['status']    : 'OK';
-    $ts     = isset($row['last_seen']) ? (int)$row['last_seen'] : null;
-    $age    = $ts ? ($now - $ts) : null;
-    $class  = cum_classify_status($age);
+function fmColorClass(color, prefix) {
+  // prefix: "fm-badge-" or "fm-dot-"
+  if (color === "green") return prefix + "green";
+  if (color === "yellow") return prefix + "yellow";
+  if (color === "red") return prefix + "red";
+  return prefix + "gray";
+}
 
-    if ($ts) {
-        $last_fmt = date('Y-m-d H:i:s', $ts);
-        $mins = floor($age / 60);
-        $age_str = $mins . " min ago";
-        if ($age > 24*60*60) {
-            $days = floor($age / (24*60*60));
-            $age_str = $days . " days ago";
-        }
-    } else {
-        $last_fmt = "never";
-        $age_str  = "N/A";
-    }
+function fmToggleDetails() {
+  var details = document.getElementById("fm-details");
+  var toggle  = document.getElementById("fm-toggle-details");
+  if (!details || !toggle) return;
 
-    $pill_style = cum_color_style($class);
-?>
-        <tr>
-            <td><?php echo htmlspecialchars($host); ?></td>
-            <td><?php echo htmlspecialchars($script); ?></td>
-            <td><?php echo htmlspecialchars($st); ?></td>
-            <td><?php echo htmlspecialchars($last_fmt); ?></td>
-            <td><?php echo htmlspecialchars($age_str); ?></td>
-            <td>
-                <span class="cum-status-pill" style="<?php echo $pill_style; ?>">
-                    <?php echo htmlspecialchars($class); ?>
-                </span>
-            </td>
-            <td>
-                <a href="/plugins/custom-unraid-monitor/api.php?action=clear&amp;id=<?php echo urlencode($id); ?>"
-                   onclick="return confirm('Remove this script entry?');">
-                    Clear
-                </a>
-            </td>
-        </tr>
-<?php endforeach; ?>
-<?php endif; ?>
-    </tbody>
-</table>
+  if (details.style.display === "none") {
+    details.style.display = "block";
+    toggle.textContent = "hide details ▴";
+  } else {
+    details.style.display = "none";
+    toggle.textContent = "show details ▾";
+  }
+}
 
-</body>
-</html>
+function fmLoadData() {
+  fetch("/plugins/custom-unraid-monitor/api.php")
+    .then(r => r.json())
+    .then(data => {
+      if (!Array.isArray(data)) data = [];
+
+      var overall = "gray";
+      var tableBody = document.querySelector("#fm-table tbody");
+      if (!tableBody) return;
+
+      tableBody.innerHTML = "";
+
+      if (data.length === 0) {
+        var tr = document.createElement("tr");
+        var td = document.createElement("td");
+        td.colSpan = 5;
+        td.textContent = "No data yet. Configure your scripts to send heartbeats.";
+        tr.appendChild(td);
+        tableBody.appendChild(tr);
+      } else {
+        data.forEach(function(item) {
+          var color = (item.status || "gray").toLowerCase();
+          if (fmStatusOrder(color) > fmStatusOrder(overall)) {
+            overall = color;
+          }
+
+          var tr = document.createElement("tr");
+
+          var tdServer = document.createElement("td");
+          tdServer.textContent = item.server || "-";
+          tr.appendChild(tdServer);
+
+          var tdScript = document.createElement("td");
+          tdScript.textContent = item.script || "-";
+          tr.appendChild(tdScript);
+
+          var tdStatus = document.createElement("td");
+          var dot = document.createElement("span");
+          dot.className = "fm-status-dot " + fmColorClass(color, "fm-dot-");
+          tdStatus.appendChild(dot);
+          var label = document.createElement("span");
+          label.textContent = (item.status || "unknown").toUpperCase();
+          tdStatus.appendChild(label);
+          tr.appendChild(tdStatus);
+
+          var tdLast = document.createElement("td");
+          tdLast.textContent = item.last_seen || "-";
+          tr.appendChild(tdLast);
+
+          var tdDetails = document.createElement("td");
+          tdDetails.textContent = item.details || "";
+          tr.appendChild(tdDetails);
+
+          tableBody.appendChild(tr);
+        });
+      }
+
+      var badge = document.getElementById("fm-overall-badge");
+      if (badge) {
+        badge.className = "badge " + fmColorClass(overall, "fm-badge-");
+        badge.textContent = overall.toUpperCase();
+      }
+    })
+    .catch(err => {
+      var tableBody = document.querySelector("#fm-table tbody");
+      if (tableBody) {
+        tableBody.innerHTML = "";
+        var tr = document.createElement("tr");
+        var td = document.createElement("td");
+        td.colSpan = 5;
+        td.textContent = "Error loading data: " + err;
+        tr.appendChild(td);
+        tableBody.appendChild(tr);
+      }
+      var badge = document.getElementById("fm-overall-badge");
+      if (badge) {
+        badge.className = "badge fm-badge-red";
+        badge.textContent = "ERROR";
+      }
+    });
+}
+
+// initial load + periodic refresh
+fmLoadData();
+setInterval(fmLoadData, 30000); // 30 seconds
+</script>
     ]]>
   </FILE>
 
   <!--
-    API endpoint for heartbeats and status.
-    Scripts will POST JSON to:
-      /plugins/custom-unraid-monitor/api.php?action=heartbeat
+    API endpoint:
+      /plugins/custom-unraid-monitor/api.php
+    Returns JSON array of objects:
+      [
+        {
+          "server": "UNAS-Pro-8",
+          "script": "ups2-monitor",
+          "status": "green|yellow|red|gray",
+          "last_seen": "2025-11-21 19:10:00",
+          "details": "Anything"
+        }
+      ]
+
+    Data source is:
+      /boot/config/plugins/custom-unraid-monitor/monitor_state.json
   -->
   <FILE Name="/usr/local/emhttp/plugins/custom-unraid-monitor/api.php">
     <![CDATA[
 <?php
-// /usr/local/emhttp/plugins/custom-unraid-monitor/api.php
+// Simple JSON API for Frank's Monitor
+header('Content-Type: application/json; charset=utf-8');
 
-$CONFIG_DIR = "/boot/config/plugins/custom-unraid-monitor";
-$STATE_FILE = "$CONFIG_DIR/state.json";
+$baseDir  = '/boot/config/plugins/custom-unraid-monitor';
+$stateFile = $baseDir . '/monitor_state.json';
 
-if (!is_dir($CONFIG_DIR)) {
-    @mkdir($CONFIG_DIR, 0777, true);
+// Ensure directory exists
+if (!is_dir($baseDir)) {
+    @mkdir($baseDir, 0777, true);
 }
 
-function cum_load_state($state_file) {
-    if (!file_exists($state_file)) return [];
-    $json = file_get_contents($state_file);
-    if (!$json) return [];
-    $data = json_decode($json, true);
-    return is_array($data) ? $data : [];
-}
-
-function cum_save_state($state_file, $data) {
-    file_put_contents($state_file, json_encode($data, JSON_PRETTY_PRINT));
-}
-
-$action = isset($_GET['action']) ? $_GET['action'] : '';
-
-if ($action === 'heartbeat' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+// If a POST comes in with JSON, allow updating the state file
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $raw = file_get_contents('php://input');
-    $payload = json_decode($raw, true);
+    if ($raw !== false && strlen(trim($raw)) > 0) {
+        @file_put_contents($stateFile, $raw);
+        echo json_encode(['ok' => true]);
+        exit;
+    } else {
+        echo json_encode(['ok' => false, 'error' => 'Empty body']);
+        exit;
+    }
+}
 
-    if (!is_array($payload)) {
-        http_response_code(400);
-        echo "Invalid JSON";
+// For GET, just return the current state or a default
+if (is_file($stateFile)) {
+    $content = file_get_contents($stateFile);
+    if ($content === false || trim($content) === '') {
+        // Treat as no data
+        echo json_encode([]);
         exit;
     }
 
-    $script  = isset($payload['script_name']) ? trim($payload['script_name']) : 'unknown';
-    $host    = isset($payload['hostname'])    ? trim($payload['hostname'])    : 'unknown';
-    $status  = isset($payload['status'])      ? trim($payload['status'])      : 'OK';
-
-    if ($script === '' || $host === '') {
-        http_response_code(400);
-        echo "Missing script_name or hostname";
+    // Try to validate JSON
+    $decoded = json_decode($content, true);
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+        // Bad JSON: don't break the UI
+        echo json_encode([]);
         exit;
     }
 
-    $key = $host . '::' . $script;
-    $now = time();
-
-    $state = cum_load_state($STATE_FILE);
-    $state[$key] = [
-        'hostname'   => $host,
-        'script'     => $script,
-        'status'     => $status,
-        'last_seen'  => $now,
-    ];
-    cum_save_state($STATE_FILE, $state);
-
-    header('Content-Type: application/json');
-    echo json_encode(['ok' => true]);
+    echo json_encode($decoded);
     exit;
 }
 
-if ($action === 'status') {
-    $state = cum_load_state($STATE_FILE);
-    header('Content-Type: application/json');
-    echo json_encode($state);
-    exit;
-}
-
-if ($action === 'clear' && isset($_GET['id'])) {
-    $id = $_GET['id'];
-    $state = cum_load_state($STATE_FILE);
-    if (isset($state[$id])) {
-        unset($state[$id]);
-        cum_save_state($STATE_FILE, $state);
-    }
-    header("Location: /Plugins");
-    exit;
-}
-
-// Fallback
-http_response_code(400);
-echo "Invalid action";
+// Default: one example row so UI isn't empty
+$hostname = gethostname() ?: 'unknown-host';
+$example = [
+    [
+        'server'    => $hostname,
+        'script'    => 'example-script',
+        'status'    => 'gray',
+        'last_seen' => date('Y-m-d H:i:s'),
+        'details'   => 'No heartbeats yet. This is example data from custom-unraid-monitor.'
+    ]
+];
+echo json_encode($example);
+exit;
+?>
     ]]>
-  </FILE>
-
-  <!--
-    Uninstall cleanup: remove state and plugin directory.
-  -->
-  <FILE Run="/bin/bash" Method="remove">
-    rm -rf /usr/local/emhttp/plugins/custom-unraid-monitor
-    rm -rf /boot/config/plugins/custom-unraid-monitor
   </FILE>
 
 </PLUGIN>
