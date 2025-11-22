@@ -1,0 +1,304 @@
+<?xml version="1.0"?>
+<PLUGIN
+    name="custom-unraid-monitor"
+    author="Frank Salesi"
+    version="2025.11.21"
+    pluginURL="https://raw.githubusercontent.com/fsalesi/custom-unraid-monitor/master/custom-unraid-monitor.plg"
+    support="https://forums.unraid.net"
+    min="7.0.0"
+    max="7.99.99">
+
+  <CHANGES>
+    Initial version of Custom Unraid Monitor plugin UI.
+  </CHANGES>
+
+  <!--
+    Main UI page (.page) – appears under Settings -> User Utilities and can be
+    opened directly from the Plugins page as well.
+  -->
+  <FILE Name="/usr/local/emhttp/plugins/custom-unraid-monitor/custom-unraid-monitor.page">
+    <![CDATA[
+<?php
+// /usr/local/emhttp/plugins/custom-unraid-monitor/custom-unraid-monitor.page
+
+$CONFIG_DIR = "/boot/config/plugins/custom-unraid-monitor";
+$STATE_FILE = "$CONFIG_DIR/state.json";
+
+if (!is_dir($CONFIG_DIR)) {
+    @mkdir($CONFIG_DIR, 0777, true);
+}
+
+function cum_load_state($state_file) {
+    if (!file_exists($state_file)) return [];
+    $json = file_get_contents($state_file);
+    if (!$json) return [];
+    $data = json_decode($json, true);
+    return is_array($data) ? $data : [];
+}
+
+$state = cum_load_state($STATE_FILE);
+$now   = time();
+
+// thresholds (seconds)
+$max_green  = 30 * 60;          // 30 minutes
+$max_yellow = 60 * 60;          // 60 minutes
+$max_red    = 7 * 24 * 60 * 60; // 7 days
+
+function cum_classify_status($age) {
+    global $max_green, $max_yellow, $max_red;
+    if ($age === null || $age > $max_red) return 'GRAY';
+    if ($age <= $max_green)  return 'GREEN';
+    if ($age <= $max_yellow) return 'YELLOW';
+    return 'RED';
+}
+
+$overall = 'GRAY';
+$worst_rank = 0; // GREEN=1, YELLOW=2, RED=3, GRAY=0
+
+foreach ($state as $id => $row) {
+    $age = isset($row['last_seen']) ? ($now - (int)$row['last_seen']) : null;
+    $c = cum_classify_status($age);
+
+    $rank = 0;
+    if ($c === 'GREEN')  $rank = 1;
+    if ($c === 'YELLOW') $rank = 2;
+    if ($c === 'RED')    $rank = 3;
+
+    if ($rank > $worst_rank) {
+        $worst_rank = $rank;
+        $overall = $c;
+    }
+}
+
+function cum_color_style($c) {
+    switch ($c) {
+        case 'GREEN':  return 'background-color:#2ecc71;color:#fff;';
+        case 'YELLOW': return 'background-color:#f1c40f;color:#000;';
+        case 'RED':    return 'background-color:#e74c3c;color:#fff;';
+        case 'GRAY':
+        default:       return 'background-color:#7f8c8d;color:#fff;';
+    }
+}
+
+$overall_style = cum_color_style($overall);
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Custom Unraid Monitor</title>
+    <style>
+        .cum-summary-box {
+            padding: 10px;
+            border-radius: 5px;
+            display: inline-block;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        table.cum-table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        table.cum-table th,
+        table.cum-table td {
+            border: 1px solid #ccc;
+            padding: 6px 8px;
+            text-align: left;
+        }
+        table.cum-table th {
+            background-color: #f0f0f0;
+        }
+        .cum-status-pill {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.9em;
+            font-weight: bold;
+            display: inline-block;
+        }
+        .cum-small-text {
+            font-size: 0.85em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Custom Unraid Monitor</h2>
+
+<div class="cum-summary-box" style="<?php echo $overall_style; ?>">
+    Overall Status: <?php echo htmlspecialchars($overall); ?>
+</div>
+
+<p class="cum-small-text">
+    GREEN ≤ 30 minutes, YELLOW ≤ 60 minutes, RED ≤ 7 days, GRAY &gt; 7 days or never seen.<br>
+    Entries can be removed manually (Clear) or will age to GRAY if inactive.
+</p>
+
+<table class="cum-table">
+    <thead>
+        <tr>
+            <th>Hostname</th>
+            <th>Script</th>
+            <th>Reported Status</th>
+            <th>Last Seen</th>
+            <th>Age</th>
+            <th>Health</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody>
+<?php if (empty($state)): ?>
+        <tr><td colspan="7">No scripts have reported in yet.</td></tr>
+<?php else: ?>
+<?php foreach ($state as $id => $row):
+    $host   = isset($row['hostname'])  ? $row['hostname']  : 'unknown';
+    $script = isset($row['script'])    ? $row['script']    : 'unknown';
+    $st     = isset($row['status'])    ? $row['status']    : 'OK';
+    $ts     = isset($row['last_seen']) ? (int)$row['last_seen'] : null;
+    $age    = $ts ? ($now - $ts) : null;
+    $class  = cum_classify_status($age);
+
+    if ($ts) {
+        $last_fmt = date('Y-m-d H:i:s', $ts);
+        $mins = floor($age / 60);
+        $age_str = $mins . " min ago";
+        if ($age > 24*60*60) {
+            $days = floor($age / (24*60*60));
+            $age_str = $days . " days ago";
+        }
+    } else {
+        $last_fmt = "never";
+        $age_str  = "N/A";
+    }
+
+    $pill_style = cum_color_style($class);
+?>
+        <tr>
+            <td><?php echo htmlspecialchars($host); ?></td>
+            <td><?php echo htmlspecialchars($script); ?></td>
+            <td><?php echo htmlspecialchars($st); ?></td>
+            <td><?php echo htmlspecialchars($last_fmt); ?></td>
+            <td><?php echo htmlspecialchars($age_str); ?></td>
+            <td>
+                <span class="cum-status-pill" style="<?php echo $pill_style; ?>">
+                    <?php echo htmlspecialchars($class); ?>
+                </span>
+            </td>
+            <td>
+                <a href="/plugins/custom-unraid-monitor/api.php?action=clear&amp;id=<?php echo urlencode($id); ?>"
+                   onclick="return confirm('Remove this script entry?');">
+                    Clear
+                </a>
+            </td>
+        </tr>
+<?php endforeach; ?>
+<?php endif; ?>
+    </tbody>
+</table>
+
+</body>
+</html>
+    ]]>
+  </FILE>
+
+  <!--
+    API endpoint for heartbeats and status.
+    Scripts will POST JSON to:
+      /plugins/custom-unraid-monitor/api.php?action=heartbeat
+  -->
+  <FILE Name="/usr/local/emhttp/plugins/custom-unraid-monitor/api.php">
+    <![CDATA[
+<?php
+// /usr/local/emhttp/plugins/custom-unraid-monitor/api.php
+
+$CONFIG_DIR = "/boot/config/plugins/custom-unraid-monitor";
+$STATE_FILE = "$CONFIG_DIR/state.json";
+
+if (!is_dir($CONFIG_DIR)) {
+    @mkdir($CONFIG_DIR, 0777, true);
+}
+
+function cum_load_state($state_file) {
+    if (!file_exists($state_file)) return [];
+    $json = file_get_contents($state_file);
+    if (!$json) return [];
+    $data = json_decode($json, true);
+    return is_array($data) ? $data : [];
+}
+
+function cum_save_state($state_file, $data) {
+    file_put_contents($state_file, json_encode($data, JSON_PRETTY_PRINT));
+}
+
+$action = isset($_GET['action']) ? $_GET['action'] : '';
+
+if ($action === 'heartbeat' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw = file_get_contents('php://input');
+    $payload = json_decode($raw, true);
+
+    if (!is_array($payload)) {
+        http_response_code(400);
+        echo "Invalid JSON";
+        exit;
+    }
+
+    $script  = isset($payload['script_name']) ? trim($payload['script_name']) : 'unknown';
+    $host    = isset($payload['hostname'])    ? trim($payload['hostname'])    : 'unknown';
+    $status  = isset($payload['status'])      ? trim($payload['status'])      : 'OK';
+
+    if ($script === '' || $host === '') {
+        http_response_code(400);
+        echo "Missing script_name or hostname";
+        exit;
+    }
+
+    $key = $host . '::' . $script;
+    $now = time();
+
+    $state = cum_load_state($STATE_FILE);
+    $state[$key] = [
+        'hostname'   => $host,
+        'script'     => $script,
+        'status'     => $status,
+        'last_seen'  => $now,
+    ];
+    cum_save_state($STATE_FILE, $state);
+
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'status') {
+    $state = cum_load_state($STATE_FILE);
+    header('Content-Type: application/json');
+    echo json_encode($state);
+    exit;
+}
+
+if ($action === 'clear' && isset($_GET['id'])) {
+    $id = $_GET['id'];
+    $state = cum_load_state($STATE_FILE);
+    if (isset($state[$id])) {
+        unset($state[$id]);
+        cum_save_state($STATE_FILE, $state);
+    }
+    header("Location: /Plugins");
+    exit;
+}
+
+// Fallback
+http_response_code(400);
+echo "Invalid action";
+    ]]>
+  </FILE>
+
+  <!--
+    Uninstall cleanup: remove state and plugin directory.
+  -->
+  <FILE Run="/bin/bash" Method="remove">
+    rm -rf /usr/local/emhttp/plugins/custom-unraid-monitor
+    rm -rf /boot/config/plugins/custom-unraid-monitor
+  </FILE>
+
+</PLUGIN>
